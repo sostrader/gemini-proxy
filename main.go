@@ -20,8 +20,8 @@ func main() {
 	}
 
 	// Listen on port 8080
-	log.Info(ctx, "Starting server on port 8080")
-	err = http.ListenAndServe(":8080", http.HandlerFunc(api.MainHandle))
+	log.Info(ctx, "Starting server on port 80")
+	err = http.ListenAndServe(":80", http.HandlerFunc(api.MainHandle))
 	if err != nil {
 		panic(err)
 	}
