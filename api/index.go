@@ -8,6 +8,8 @@ import (
 	"go.zzfly.net/geminiapi/util/log"
 	"go.zzfly.net/geminiapi/util/trace"
 	"net/http"
+	"net/url"
+	"strings"
 )
 
 const ctxKeyRespWriter = "respWriter"
@@ -25,14 +27,29 @@ func MainHandle(w http.ResponseWriter, r *http.Request) {
 	log.Info(ctx, "Request headers: %v", logHeaders(r.Header))
 	log.Info(ctx, "Request query parameters: %v", r.URL.Query())
 
-	// Get the API key from query parameters
-	apiKey := getFromQuery(r, "key", "")
-	log.Info(ctx, "API Key from query: %s", maskAPIKey(apiKey))
+	// Always set API key to empty to force using Redis API key for all endpoints
+	apiKey := ""
+	log.Info(ctx, "Using Redis API key for all endpoints, ignoring client provided keys")
 
 	// Construct the full URL path with query parameters
 	fullPath := r.URL.Path
 	if r.URL.RawQuery != "" {
 		fullPath += "?" + r.URL.RawQuery
+	}
+
+	// Store a sanitized version of the path for logging (without client API key)
+	sanitizedPath := fullPath
+	if strings.Contains(sanitizedPath, "key=") {
+		// Remove the key parameter from the URL for logging purposes
+		u, err := url.Parse(sanitizedPath)
+		if err == nil {
+			q := u.Query()
+			if q.Has("key") {
+				q.Del("key")
+				u.RawQuery = q.Encode()
+				sanitizedPath = u.String()
+			}
+		}
 	}
 
 	in := handler.SendToGeminiInput{
@@ -44,7 +61,7 @@ func MainHandle(w http.ResponseWriter, r *http.Request) {
 		Headers:     r.Header,
 	}
 
-	log.Info(ctx, "start request: %s", in.Url)
+	log.Info(ctx, "start request: %s", sanitizedPath)
 	geminiResp, err := handler.SendToGemini(ctx, in)
 	if err != nil {
 		log.Error(ctx, "send to gemini err: %v", err)
@@ -52,7 +69,7 @@ func MainHandle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Info(ctx, "end request: %s", in.Url)
+	log.Info(ctx, "end request: %s", sanitizedPath)
 	doGeminiResponse(ctx, geminiResp)
 }
 
