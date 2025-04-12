@@ -2,6 +2,7 @@ package redis
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"strconv"
 	"strings"
@@ -18,7 +19,7 @@ var (
 	client     *redis.Client
 	clientOnce sync.Once
 	// Key for storing API keys in Redis
-	apiKeysKey = "gemini"
+	apiKeysKey = "gemini-proxy"
 	// Current position for round-robin selection
 	currentPos = 0
 	// Mutex for thread-safe access to currentPos
@@ -87,6 +88,18 @@ func InitializeAPIKeys(ctx context.Context) error {
 
 	// Add keys to Redis list
 	for _, key := range apiKeys {
+		// Ensure the key is a valid JSON string with proxy and key fields
+		var keyData map[string]interface{}
+		if err := json.Unmarshal([]byte(key), &keyData); err != nil {
+			log.Error(ctx, "Skipping invalid API key format: %s, error: %v", key, err)
+			continue
+		}
+
+		if _, hasKey := keyData["key"]; !hasKey {
+			log.Error(ctx, "Skipping API key without 'key' field: %s", key)
+			continue
+		}
+
 		_, err := client.RPush(ctx, apiKeysKey, key).Result()
 		if err != nil {
 			return err
@@ -97,25 +110,25 @@ func InitializeAPIKeys(ctx context.Context) error {
 	return nil
 }
 
-// GetAPIKey returns an API key using round-robin selection
-func GetAPIKey(ctx context.Context) (string, error) {
+// GetAPIKey returns an API key and proxy URL using round-robin selection
+func GetAPIKey(ctx context.Context) (string, string, error) {
 	client := GetClient()
 	if client == nil {
 		// Fallback to environment variable if Redis is not available
 		log.Info(ctx, "Redis not available, falling back to environment variable")
-		return getFallbackAPIKey(), nil
+		return getFallbackAPIKey(), "", nil
 	}
 
 	// Get the number of keys in the list
 	count, err := client.LLen(ctx, apiKeysKey).Result()
 	if err != nil {
 		log.Error(ctx, "Failed to get API keys count from Redis: %v", err)
-		return getFallbackAPIKey(), nil
+		return getFallbackAPIKey(), "", nil
 	}
 
 	if count == 0 {
 		log.Info(ctx, "No API keys found in Redis, falling back to environment variable")
-		return getFallbackAPIKey(), nil
+		return getFallbackAPIKey(), "", nil
 	}
 
 	// Get next position in round-robin fashion
@@ -128,13 +141,37 @@ func GetAPIKey(ctx context.Context) (string, error) {
 	posMutex.Unlock()
 
 	// Get the API key at the current position
-	apiKey, err := client.LIndex(ctx, apiKeysKey, int64(position)).Result()
+	apiKeyJson, err := client.LIndex(ctx, apiKeysKey, int64(position)).Result()
 	if err != nil {
 		log.Error(ctx, "Failed to get API key from Redis: %v", err)
-		return getFallbackAPIKey(), nil
+		return getFallbackAPIKey(), "", nil
 	}
 
-	return apiKey, nil
+	// Parse the JSON to extract key and proxy
+	var keyData map[string]string
+	err = json.Unmarshal([]byte(apiKeyJson), &keyData)
+	if err != nil {
+		log.Error(ctx, "Failed to parse API key JSON from Redis: %v", err)
+		return getFallbackAPIKey(), "", nil
+	}
+
+	// Extract the API key and proxy URL
+	apiKey := keyData["key"]
+	proxyURL := keyData["proxy"]
+
+	maskedKey := ""
+	if apiKey != "" {
+		if len(apiKey) < 8 {
+			maskedKey = "<too_short>"
+		} else {
+			maskedKey = apiKey[0:4] + "****" + apiKey[len(apiKey)-4:]
+		}
+	} else {
+		maskedKey = "<empty>"
+	}
+
+	log.Info(ctx, "Got API key and proxy from Redis: key=%s, proxy=%s", maskedKey, proxyURL)
+	return apiKey, proxyURL, nil
 }
 
 // Helper functions

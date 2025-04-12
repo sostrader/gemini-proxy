@@ -14,7 +14,7 @@ import (
 
 const PROXY_URL = "https://generativelanguage.googleapis.com"
 
-var httpClient = http.Client{
+var defaultHttpClient = &http.Client{
 	Timeout: 30 * time.Second,
 }
 
@@ -38,7 +38,11 @@ type GeminiResponse struct {
 func SendToGemini(ctx context.Context, in SendToGeminiInput) (*GeminiResponse, error) {
 	// Construir a URL completa usando o caminho da requisição original
 	fullUrl := PROXY_URL + in.Url
-	apiKey := getAPIKey(in)
+	apiKey, proxyURL, err := getAPIKeyAndProxy(in)
+	if err != nil {
+		return nil, fmt.Errorf("could not get API key and proxy: %w", err)
+	}
+
 	parse, err := url.Parse(fullUrl)
 	if err != nil {
 		return nil, fmt.Errorf("could not parse url: %w", err)
@@ -58,6 +62,26 @@ func SendToGemini(ctx context.Context, in SendToGeminiInput) (*GeminiResponse, e
 
 	log.Info(ctx, "using api key: %s", maskAPIKey(apiKey))
 	log.Info(ctx, "Final request URL: %s", fullUrl)
+
+	// Create the HTTP client with or without proxy
+	httpClient := defaultHttpClient
+	if proxyURL != "" {
+		log.Info(ctx, "Using proxy: %s", proxyURL)
+		proxyURLParsed, err := url.Parse(proxyURL)
+		if err != nil {
+			log.Error(ctx, "Failed to parse proxy URL: %v", err)
+		} else {
+			// Create a transport with the proxy
+			transport := &http.Transport{
+				Proxy: http.ProxyURL(proxyURLParsed),
+			}
+			// Create a client with the transport
+			httpClient = &http.Client{
+				Transport: transport,
+				Timeout:   30 * time.Second,
+			}
+		}
+	}
 
 	// Create a new request with the appropriate method
 	req, err := http.NewRequestWithContext(ctx, in.Method, fullUrl, in.Payload)
@@ -107,22 +131,22 @@ func SendToGemini(ctx context.Context, in SendToGeminiInput) (*GeminiResponse, e
 	}, nil
 }
 
-// getAPIKey returns the api key from the input or from Redis/env
-func getAPIKey(in SendToGeminiInput) string {
+// getAPIKeyAndProxy returns the api key and proxy from the input or from Redis/env
+func getAPIKeyAndProxy(in SendToGeminiInput) (string, string, error) {
 	// If API key is provided in the request, use it
 	if in.APIKey != "" {
-		return in.APIKey
+		return in.APIKey, "", nil
 	}
 
 	// Get API key from Redis using round-robin selection with trace info
 	ctx := trace.WrapTraceInfo(context.Background())
-	apiKey, err := redis.GetAPIKey(ctx)
+	apiKey, proxyURL, err := redis.GetAPIKey(ctx)
 	if err != nil {
 		log.Error(ctx, "Failed to get API key from Redis: %v", err)
 		// Fallback to environment variable is handled inside redis.GetAPIKey
 	}
 
-	return apiKey
+	return apiKey, proxyURL, err
 }
 
 // maskAPIKey masks an API key for secure logging
