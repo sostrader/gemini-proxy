@@ -3,19 +3,20 @@ package handler
 import (
 	"context"
 	"fmt"
-	"go.zzfly.net/geminiapi/util/log"
-	"go.zzfly.net/geminiapi/util/redis"
-	"go.zzfly.net/geminiapi/util/trace"
 	"io"
 	"net/http"
 	"net/url"
 	"time"
+
+	"go.zzfly.net/geminiapi/util/log"
+	"go.zzfly.net/geminiapi/util/redis"
+	"go.zzfly.net/geminiapi/util/trace"
 )
 
 const PROXY_URL = "https://generativelanguage.googleapis.com"
 
 var defaultHttpClient = &http.Client{
-	Timeout: 30 * time.Second,
+	Timeout: 300 * time.Second,
 }
 
 type SendToGeminiInput struct {
@@ -78,7 +79,7 @@ func SendToGemini(ctx context.Context, in SendToGeminiInput) (*GeminiResponse, e
 			// Create a client with the transport
 			httpClient = &http.Client{
 				Transport: transport,
-				Timeout:   30 * time.Second,
+				Timeout:   300 * time.Second,
 			}
 		}
 	}
