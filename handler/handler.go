@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"time"
 
 	"go.zzfly.net/geminiapi/util/log"
@@ -66,7 +67,7 @@ func SendToGemini(ctx context.Context, in SendToGeminiInput) (*GeminiResponse, e
 
 	// Create the HTTP client with or without proxy
 	httpClient := defaultHttpClient
-	if proxyURL != "" {
+	if proxyURL != "" && os.Getenv("DISABLE_PROXY") != "true" {
 		log.Info(ctx, "Using proxy: %s", proxyURL)
 		proxyURLParsed, err := url.Parse(proxyURL)
 		if err != nil {
@@ -82,6 +83,8 @@ func SendToGemini(ctx context.Context, in SendToGeminiInput) (*GeminiResponse, e
 				Timeout:   300 * time.Second,
 			}
 		}
+	} else if proxyURL != "" && os.Getenv("DISABLE_PROXY") == "true" {
+		log.Info(ctx, "Proxy disabled by DISABLE_PROXY environment variable, using direct connection")
 	}
 
 	// Create a new request with the appropriate method
